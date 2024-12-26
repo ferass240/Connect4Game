@@ -17,9 +17,18 @@
 /* Engine, AI, and Display Parameters */
 #define SHM_NAME "/bot_move"  // Name of the shared memory segment
 #define SHM_SIZE 2*sizeof(int)     // Size of the shared memory (size of an int)
-#define FILE_PATH "detected_disc.txt"
+
+//#define FILE_PATH "detected_disc.txt"
+
+
 #define SHM_NAME_NEW_DISC "/new_disc_shared_memory"
-#define SHM_NAME_NEW_DISC_SIZE 8*sizeof(int) 
+#define SHM_NEW_DISC_SIZE 8*sizeof(int) 
+        
+// const char *SHM_NAME_NEW_DISC = "/new_disc_shared_memory";
+int shm_fd_new_disc;
+void *shm_ptr_new_disc;
+
+
 #define WINNER_FILE "winner.txt"  // The file where the winner will be written
 
 enum player_type{
@@ -653,7 +662,7 @@ static int connect4_game_run(struct connect4_game *g,
     }
 }
 
-int read_new_disc_from_file() {
+/**int read_new_disc_from_file() {
     FILE *file = fopen(FILE_PATH, "r");
     if (file == NULL) {
         perror("Failed to open file");
@@ -679,65 +688,40 @@ int read_new_disc_from_file() {
         fclose(file);
         return -1; // Return -1 if no valid data is found
     }
+}**/
+
+
+
+
+
+// Function to read the value from shared memory
+int read_from_shared_memory(void *shm_ptr_new_disc) {
+
+    
+    int value = -1; // Default return value if flag is not set
+
+    // Read the flag (bytes 4-7)
+    int flag = *((int *)((uint8_t *)shm_ptr_new_disc + 4));
+
+    if (flag == 1) {
+        // If flag is set, read the value (bytes 0-3)
+        value = *((int *)((uint8_t *)shm_ptr_new_disc));
+
+        // Reset the flag (optional, based on your logic)
+        *((int *)((uint8_t *)shm_ptr_new_disc + 4)) = 0;  // Reset flag to 0
+        printf("Value read from shared memory: %d\n", value);
+    } else {
+        printf("No new data available in shared memory (flag=0).\n");
+    }
+
+    return value;
 }
 
 
-    
-    /**printf("i'm inside the function read new disc from shm");
-    // Open shared memory
-    int shm_fd = shm_open(SHM_NAME_NEW_DISC, O_RDWR, 0666);
-    if (shm_fd == -1) {
-        perror("shm_open");
-        exit(EXIT_FAILURE);
-    }
-    
-    
-    // Map shared memory
-    void *shm_ptr = mmap(NULL, SHM_NAME_NEW_DISC_SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
-    if (shm_ptr == MAP_FAILED) {
-        perror("mmap");
-        close(shm_fd);
-        exit(EXIT_FAILURE);
-    }
 
 
-    int value, flag;
-    
-    // Read value and flag from shared memory
-    memcpy(&value, shm_ptr, sizeof(int));  // Read value (first 4 bytes)
-    memcpy(&flag, (char *)shm_ptr + sizeof(int), sizeof(int)); // Read flag (next 4 bytes)
 
-    if (flag == 1) { // Check if the flag is set (ready)
-        printf("Read from shared memory: %d (Ready flag: %d)\n", value, flag);
-            // Open log file for writing
-        FILE *log_file = fopen("debug_log1.txt", "a");
-        if (log_file == NULL) {
-            perror("Failed to open log file");
-            return -1;
-        }
-        fprintf(log_file, "Starting read_new_disc_from_shm()\n");
-        // Validate and process the move
-        if (value > 0 && value <= 7) { // Ensure column is valid
-            // Reset the flag (optional if Python handles it, but safe here)
-            int reset_flag = 0;
-            memcpy((char *)shm_ptr + sizeof(int), &reset_flag, sizeof(int));
-            printf("Flag reset after processing move.\n");
 
-            // Clean up and return the valid move
-            munmap(shm_ptr, SHM_NAME_NEW_DISC_SIZE);
-            close(shm_fd);
-            return value;
-        }
-    }
-
-    sleep(1); // Avoid busy-waiting
-    // Clean up resources (will never reach here in this loop)
-    munmap(shm_ptr, SHM_NAME_NEW_DISC_SIZE);
-    close(shm_fd);
-
-    return -1; // Fallback return to avoid compiler warnings
-}
-* */
 
 
 static int player_human(const struct connect4_game *g, void *arg) {
@@ -747,7 +731,9 @@ static int player_human(const struct connect4_game *g, void *arg) {
 
     int play = -1;
     while (play == -1) { // Wait for a valid move
-        play = read_new_disc_from_file(); // Read the move from the .txt file
+        play = read_from_shared_memory(shm_ptr_new_disc);
+        //play = read_new_disc_from_file(); // Read the move from the .txt file
+        
         if (play == -1) {
             sleep(1); // Wait before retrying to avoid busy-waiting
         }
@@ -781,10 +767,36 @@ player_ai(const struct connect4_game *g, void *arg)
 
 static char buf[2][CONNECT4_MEMORY_SIZE];  // AI search tree storage
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 int main() {
+
+
+    
     int player_type[2] = {PLAYER_AI, PLAYER_HUMAN};  // Default: AI vs. Human
 
-    // Check for game mode signal
+    //Check for game mode signal
     FILE *file1 = fopen("game_mode.txt", "r");
     if (file1) {
         os_reset_terminal();
@@ -804,6 +816,47 @@ int main() {
     
     os_init();
     setlocale(LC_ALL, "");
+
+
+
+
+
+
+        printf("Creating shared memory...\n");
+
+    // Create shared memory object
+    shm_fd_new_disc = shm_open(SHM_NAME_NEW_DISC, O_CREAT | O_RDWR, 0666);
+    if (shm_fd_new_disc == -1) {
+        perror("Error creating shared memory");
+        exit(EXIT_FAILURE);
+    }
+
+    // Resize shared memory object to 8 bytes
+    if (ftruncate(shm_fd_new_disc, 8) == -1) {
+        perror("Error setting shared memory new disc size");
+        shm_unlink(SHM_NAME_NEW_DISC); // Cleanup if resizing fails
+        exit(EXIT_FAILURE);
+    }
+
+    // Map the shared memory object
+    shm_ptr_new_disc = mmap(0, 8, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd_new_disc, 0);
+    if (shm_ptr_new_disc == MAP_FAILED) {
+        perror("Error mapping shared memory");
+        shm_unlink(SHM_NAME_NEW_DISC); // Cleanup if mapping fails
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Shared memory '%s' created and mapped.\n", SHM_NAME_NEW_DISC);
+    // Initialize shared memory to 0
+    *((int *)shm_ptr_new_disc) = 0;      // Value
+    *((int *)((uint8_t *)shm_ptr_new_disc + 4)) = 0; // Flag
+
+
+
+
+
+
+
 
     // Delete any old IPC file if necessary
     delete_bot_move_file();
@@ -894,7 +947,17 @@ int main() {
     // Cleanup
     munmap(move_ptr, SHM_SIZE);  // Unmap the shared memory
     close(fd);  // Close the shared memory object
+  
+    
+      // Cleanup shared memory when done
+    munmap(shm_ptr_new_disc, 8);       // Unmap the memory
+    shm_unlink(SHM_NAME_NEW_DISC);     // Unlink the shared memory
+    close(shm_fd_new_disc);            // Close the file descriptor
+    printf("Shared memory '%s' cleaned up.\n", SHM_NAME_NEW_DISC);
+
     os_finish();
+    
+    
 
     return 0;
 }
