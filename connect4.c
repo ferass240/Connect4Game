@@ -2,6 +2,9 @@
 #include <time.h>
 #include <stdio.h>
 #include <wchar.h>
+#include <unistd.h>  // for sleep()
+#include <string.h>
+
 #include <assert.h>
 #include <locale.h>
 #include <stdlib.h>
@@ -13,7 +16,11 @@
 
 /* Engine, AI, and Display Parameters */
 #define SHM_NAME "/bot_move"  // Name of the shared memory segment
-#define SHM_SIZE sizeof(int)     // Size of the shared memory (size of an int)
+#define SHM_SIZE 2*sizeof(int)     // Size of the shared memory (size of an int)
+#define FILE_PATH "detected_disc.txt"
+#define SHM_NAME_NEW_DISC "/new_disc_shared_memory"
+#define SHM_NAME_NEW_DISC_SIZE 8*sizeof(int) 
+#define WINNER_FILE "winner.txt"  // The file where the winner will be written
 
 enum player_type{
     PLAYER_HUMAN, 
@@ -60,6 +67,7 @@ os_init(void)
 {
     // nothing
 }
+
 
 static void
 os_color(int color)
@@ -360,6 +368,8 @@ connect4_advance(struct connect4_ai *c, int play)
         c->root = connect4_alloc(c);
 }
 
+
+
 static int
 connect4_playout(struct connect4_ai *c,
                  uint32_t node,
@@ -419,6 +429,8 @@ connect4_playout(struct connect4_ai *c,
             n->score[play] += CONNECT4_SCORE_WIN;
         else if (winner == 2)
             n->score[play] += CONNECT4_SCORE_DRAW;
+        //write_winner_to_file(winner);
+        //sleep(3);
         return winner;
     } else {
         /* Select a random, unplayed move. */
@@ -612,11 +624,14 @@ static int connect4_game_run(struct connect4_game *g,
                        void *args[2],
                        int display)
 {
+
     if (display) {
         connect4_display(g->state[0], g->state[1], g->marker);
     }
 
     for (;;) {
+        printf("Current Turn: %d\n", g->turn);  // Debug output
+
         int play = players[g->turn](g, args[g->turn]); // Get the current player's move
 
         // Write AI moves to shared memory in real-time
@@ -633,42 +648,120 @@ static int connect4_game_run(struct connect4_game *g,
             connect4_display(g->state[0], g->state[1], g->marker);
         }
 
-        // Check the game result
-        switch (r) {
-            case CONNECT4_RESULT_UNRESOLVED:
-                break; // Continue the game loop
-            case CONNECT4_RESULT_DRAW:
-                printf("Game ended in a draw.\n");
-                return 2;
-            case CONNECT4_RESULT_WIN:
-                printf("Player %d wins!\n", g->winner + 1);
-                return g->winner;
-        }
-
-        // Switch turn to the next player
+        
         
     }
 }
 
+int read_new_disc_from_file() {
+    FILE *file = fopen(FILE_PATH, "r");
+    if (file == NULL) {
+        perror("Failed to open file");
+        return -1;
+    }
 
-static int
-player_human(const struct connect4_game *g, void *arg)
-{
-    (void)arg;
-    uint64_t taken = g->state[0] | g->state[1];
-    for (;;) {
-        wprintf(L"> ");
-        fflush(stdout);
-        char line[64];
-        if (!fgets(line, sizeof(line), stdin))
-            exit(-1);
-        int play = strtol(line, 0, 10);
-        play--;
-        if (connect4_valid(taken, play))
-            return play;
-        wprintf(L"invalid move\n");
+    int detected_column;
+    if (fscanf(file, "%d", &detected_column) == 1) {
+        // After reading the value, clear the contents of the file
+        sleep(3);
+        fclose(file);
+
+        // Open the file in write mode to clear its contents
+        file = fopen(FILE_PATH, "w");
+        if (file == NULL) {
+            perror("Failed to open file for clearing");
+            return -1;
+        }
+        fclose(file);  // Close it after clearing
+
+        return detected_column;
+    } else {
+        fclose(file);
+        return -1; // Return -1 if no valid data is found
     }
 }
+
+
+    
+    /**printf("i'm inside the function read new disc from shm");
+    // Open shared memory
+    int shm_fd = shm_open(SHM_NAME_NEW_DISC, O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("shm_open");
+        exit(EXIT_FAILURE);
+    }
+    
+    
+    // Map shared memory
+    void *shm_ptr = mmap(NULL, SHM_NAME_NEW_DISC_SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+    if (shm_ptr == MAP_FAILED) {
+        perror("mmap");
+        close(shm_fd);
+        exit(EXIT_FAILURE);
+    }
+
+
+    int value, flag;
+    
+    // Read value and flag from shared memory
+    memcpy(&value, shm_ptr, sizeof(int));  // Read value (first 4 bytes)
+    memcpy(&flag, (char *)shm_ptr + sizeof(int), sizeof(int)); // Read flag (next 4 bytes)
+
+    if (flag == 1) { // Check if the flag is set (ready)
+        printf("Read from shared memory: %d (Ready flag: %d)\n", value, flag);
+            // Open log file for writing
+        FILE *log_file = fopen("debug_log1.txt", "a");
+        if (log_file == NULL) {
+            perror("Failed to open log file");
+            return -1;
+        }
+        fprintf(log_file, "Starting read_new_disc_from_shm()\n");
+        // Validate and process the move
+        if (value > 0 && value <= 7) { // Ensure column is valid
+            // Reset the flag (optional if Python handles it, but safe here)
+            int reset_flag = 0;
+            memcpy((char *)shm_ptr + sizeof(int), &reset_flag, sizeof(int));
+            printf("Flag reset after processing move.\n");
+
+            // Clean up and return the valid move
+            munmap(shm_ptr, SHM_NAME_NEW_DISC_SIZE);
+            close(shm_fd);
+            return value;
+        }
+    }
+
+    sleep(1); // Avoid busy-waiting
+    // Clean up resources (will never reach here in this loop)
+    munmap(shm_ptr, SHM_NAME_NEW_DISC_SIZE);
+    close(shm_fd);
+
+    return -1; // Fallback return to avoid compiler warnings
+}
+* */
+
+
+static int player_human(const struct connect4_game *g, void *arg) {
+    printf("I'm inside the function player_human\n");
+    (void)arg;
+    uint64_t taken = g->state[0] | g->state[1];
+
+    int play = -1;
+    while (play == -1) { // Wait for a valid move
+        play = read_new_disc_from_file(); // Read the move from the .txt file
+        if (play == -1) {
+            sleep(1); // Wait before retrying to avoid busy-waiting
+        }
+    }
+    play--; // Convert to 0-based column index
+
+    if (connect4_valid(taken, play)) {
+        return play;
+    } else {
+        wprintf(L"Invalid move\n");
+        return player_human(g, arg); // Retry on invalid move
+    }
+}
+
 
 struct ai_config {
     struct connect4_ai *ai;
@@ -688,16 +781,32 @@ player_ai(const struct connect4_game *g, void *arg)
 
 static char buf[2][CONNECT4_MEMORY_SIZE];  // AI search tree storage
 
-int main(void) {
-    /* Options */
-    enum player_type player_type[2] = {
-        PLAYER_HUMAN, PLAYER_AI
-    };
+int main() {
+    int player_type[2] = {PLAYER_AI, PLAYER_HUMAN};  // Default: AI vs. Human
 
+    // Check for game mode signal
+    FILE *file1 = fopen("game_mode.txt", "r");
+    if (file1) {
+        os_reset_terminal();
+        int mode;
+        if (fscanf(file1, "%d", &mode) == 1) {
+            if (mode == 1) {
+                player_type[0] = PLAYER_HUMAN;  // Human vs. AI
+                player_type[1] = PLAYER_AI;
+            } else if (mode == 2) {
+                player_type[0] = PLAYER_AI;  // AI vs. Human
+                player_type[1] = PLAYER_HUMAN;
+            }
+        }
+        fclose(file1);
+        remove("game_mode.txt");  // Clear the signal file after reading
+    }
+    
     os_init();
     setlocale(LC_ALL, "");
 
-    delete_bot_move_file(); // Make sure any old IPC file is removed
+    // Delete any old IPC file if necessary
+    delete_bot_move_file();
 
     // Shared memory setup for bot move communication
     int fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -718,46 +827,16 @@ int main(void) {
         perror("mmap failed");
         exit(1);
     }
-    
-    
 
-    /* Main Menu */
+    // Initialize game
+    int game_over = 0;
+
+     // Main Menu
     int done = 0;
-    do {
-        os_reset_terminal();
-        int item_color = 10;
-        os_color(item_color); fputwc(L'1', stdout); os_color(0);
-        wprintf(L") Human vs. Computer (default)\n");
-        os_color(item_color); fputwc(L'2', stdout); os_color(0);
-        wprintf(L") Computer vs. Human\n");
-        os_color(item_color); fputwc(L'3', stdout); os_color(0);
-        wprintf(L") Computer vs. Computer\n");
-        wprintf(L"> ");
-        fflush(stdout);
-        int c = getchar();
-        switch (c) {
-            case EOF:
-                exit(-1);
-            case '\n':
-            case '\r':
-                done = 1;
-                break;
-            case '1':
-                player_type[0] = PLAYER_HUMAN;
-                player_type[1] = PLAYER_AI;
-                break;
-            case '2':
-                player_type[0] = PLAYER_AI;
-                player_type[1] = PLAYER_HUMAN;
-                break;
-            case '3':
-                player_type[0] = PLAYER_AI;
-                player_type[1] = PLAYER_AI;
-                break;
-        }
-    } while (!done);
-
-    /* Initialization */
+    // Start the game with the selected player types
+    printf("Game starting: Player 1: %d, Player 2: %d\n", player_type[0], player_type[1]);
+    
+    // Initialization
     connect4_startup();
     connect4_player players[2];
     void *args[2];
@@ -779,27 +858,43 @@ int main(void) {
         }
     }
 
-    /* Game Loop */
+    // Game Loop
     struct connect4_game game;
     connect4_game_init(&game);
+    printf("connect_run called");
     connect4_game_run(&game, players, args, 1);
 
-    // Write the bot's move to shared memory after the game is over
-    *move_ptr = game.winner;  // Store the winner in shared memory for later use by Python
-    
-    if (game.winner == 2) {
+    // After the game ends, write the winner to shared memory
+   // *(move_ptr+1) = game.winner;  // Store the winner in shared memory (0, 1 for player, -1 for draw)
+
+    // Display the game result
+    if (game.winner == -1) {
         wprintf(L"Draw.\n\n");
     } else {
+        sleep(2);
         wprintf(L"Player ");
         os_color(game.winner ? COLOR_PLAYER1 : COLOR_PLAYER0);
         fputwc(FULL_BLOCK, stdout);
         os_color(0);
-        wprintf(L" wins!\n\n");
+        wprintf(L" wins!\n");
     }
+    FILE *file2 = fopen(WINNER_FILE, "w");
+    if (file2 == NULL) {
+        perror("Failed to open file");
+    }
+    
+    fprintf(file2, "%d\n", game.winner);  // Write the winner (1 or 2)
+    fclose(file2);
+    printf("Winner %d written to %s\n", game.winner, WINNER_FILE);
+    sleep(30);
+
+    // Set shared memory to 255 to signal the end of the game
+    *move_ptr = 255;  // Game over signal
 
     // Cleanup
     munmap(move_ptr, SHM_SIZE);  // Unmap the shared memory
     close(fd);  // Close the shared memory object
     os_finish();
+
     return 0;
 }

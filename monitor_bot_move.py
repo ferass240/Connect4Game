@@ -3,15 +3,17 @@ import RPi.GPIO as GPIO
 from multiprocessing import shared_memory
 import sys
 import os
-import signal
 import subprocess
 
-    
+
+WINNER_FILE = "winner.txt"
+
+
+
 def cleanup(pin_map, shm=None, c_process=None):
     """Clean up GPIO pins, shared memory, and C program process."""
-    GPIO.setmode(GPIO.BCM) # Use BCM pin numbering
+    GPIO.setmode(GPIO.BCM)  # Use BCM pin numbering
     GPIO.setwarnings(False)
-    
     
     # Set all pins to LOW initially
     for pin in pin_map.values():
@@ -20,20 +22,38 @@ def cleanup(pin_map, shm=None, c_process=None):
         GPIO.output(pin, GPIO.LOW)
     
     GPIO.cleanup()
+    
     if shm:
+        # Reset shared memory to 255 (idle state)
+        shm.buf[0] = 255
         shm.close()
-        shm.unlink()  # Unlink shared memory (ensures it is removed)
-
+        shm.unlink()  # Unlink shared memory to ensure it is removed
+        print("Shared memory unlinked.")
+    
     if c_process:
         c_process.terminate()
+        c_process.wait()  # Ensure the process is fully terminated
         print("C program terminated.")
-    print("Cleanup complete. Exiting.")
 
-
+   
+def read_winner_from_file():
+    try:
+        with open(WINNER_FILE, "r") as file:
+            winner = file.read().strip()
+            if winner:
+                return int(winner)  # Return the winner as an integer (1 or 2)
+            else:
+                return None  # No winner yet
+    except FileNotFoundError:
+        print(f"{WINNER_FILE} not found.")
+        return None 
+    
 def start_c_program():
     """Compile and run the C program."""
-    c_program = "./connect4_game"
-    c_source = "connect4_game.c"
+    #print("In function start_c_program")
+    time.sleep(5)  # Delay to simulate some startup time
+    c_program = "./connect4"
+    c_source = "connect4.c"
     if not os.path.exists(c_program):
         print("C program not compiled. Compiling now...")
         compile_command = f"gcc -o {c_program} {c_source} -lm"
@@ -44,10 +64,9 @@ def start_c_program():
     print("Starting C program...")
     return subprocess.Popen(c_program)
 
-
 def monitor_bot_move():
     # Set up GPIO
-    GPIO.setmode(GPIO.BCM) # Use BCM pin numbering
+    GPIO.setmode(GPIO.BCM)  # Use BCM pin numbering
     GPIO.setwarnings(False)
     
     # Map GPIO pins for binary output (0-7 needs 3 bits)
@@ -55,35 +74,35 @@ def monitor_bot_move():
         0: 17,  # LSB
         1: 18,
         2: 27   # MSB
-   }
-
+    }
     
     # Set all pins to LOW initially
     for pin in pin_map.values():
         GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+
     # Start the C program
+    print("Calling function start_c_program")
     c_process = start_c_program()
+    
+    time.sleep(1)
+
     shm = None  # Initialize shared memory reference
+    
     try:
         # Attach to shared memory created by the C program
         shm = shared_memory.SharedMemory(name='/bot_move')  # Match the name in C code
+        print("Shared memory attached.")
         last_move = None  # Track the last processed move
         
-        print("Monitoring bot moves...")
+        #print("Monitoring bot moves...")
         while True:
             try:
                 # Read the move from shared memory
                 move = shm.buf[0]  # Shared memory buffer contains the move as a byte
-
+        
                 # Check if a move is valid and ready for processing
-                if move != 255 and move != 0:  # Use 255 as the reset/idle state
-                    # Process the move
+                if move != 255 and move != 0:
                     print(f"Bot's move: Binary {bin(move)[2:].zfill(3)}")
-                    
-                    # Output 0 (all pins LOW) and wait for 0.5 seconds
-                    #for pin in pin_map.values():
-                        #GPIO.output(pin, GPIO.LOW)
-                    #time.sleep(0.5)
                     
                     if 0 <= move <= 7:  # Ensure the move is in range
                         # Update GPIO pins to represent the binary value
@@ -91,6 +110,9 @@ def monitor_bot_move():
                             # Extract the bit value (0 or 1) using bitwise operations
                             bit_value = (move >> bit_position) & 1
                             GPIO.output(pin, GPIO.HIGH if bit_value else GPIO.LOW)
+                        time.sleep(1)
+                        for pin in  pin_map.values():
+                            GPIO.output(pin, GPIO.LOW)
                     else:
                         print("Move out of range (0-7).")
                     
@@ -113,6 +135,12 @@ def monitor_bot_move():
 
     finally:
         # Cleanup GPIO and shared memory
+        winner = read_winner_from_file()
+        if winner is not None:
+            print(f"The winner is player {winner}")
+        else:
+            print("Game over")
+        
         cleanup(pin_map, shm, c_process)
 
 if __name__ == "__main__":
@@ -121,4 +149,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\nProgram interrupted by user.")
         sys.exit(0)
+        
+        
+
 
