@@ -5,6 +5,9 @@ from collections import deque
 import warnings
 from multiprocessing import shared_memory
 import struct
+import mmap
+import os  
+import sys
 num_columns = 7
 # Define ROI coordinates (adjust based on camera position)
 x_start, y_start = 75, 90
@@ -14,8 +17,12 @@ x_end, y_end = 550, 450
 # shared memory init
 shm_name = "/new_disc_shared_memory"
 shm_size = 8
+# Open the shared memory segment created by the C code
+#shm_fd_new_disc = os.open("/dev/shm/new_disc_shared_memory", os.O_RDWR)  # Use the correct path
+#shm_new_disc = mmap.mmap(shm_fd_new_disc, 8)
 
-def video_capture():
+
+def video_capture():   
     cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
     #cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
     #cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -147,25 +154,90 @@ def write_to_txt(detected_column):
     print(f"Written to file: {detected_column}")
 
 def write_to_shared_memory(shm, detected_column):
-    packed_data = struct.pack('i', detected_column) + struct.pack('i', 1)  # Value + Ready Flag
-    shm.buf[:8] = packed_data
-    print(f"Written to shared memory: {detected_column} (Ready)")
-    time.sleep(2)
-    shm.buf[4:8] = struct.pack('i', 0)  # Reset the flag
+    try:
+        # Attach to shared memory created by the C program
+        shm = shared_memory.SharedMemory(name='new_disc_shared_memory')  # Match the name in C code
+        print("Shared memory new disc attached.")
+        packed_data = struct.pack('i', detected_column) + struct.pack('i', 1)  # Value + Ready Flag
+        shm.buf[:8] = packed_data
+        print(f"Written to shared memory: {detected_column} (Ready)")
+        time.sleep(3)
+        shm.buf[4:8] = struct.pack('i', 0)  # Reset the flag
+    except FileNotFoundError:
+        print("Shared memory not found. Ensure the C program is running.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+    
+def check_shared_memory_exists():
+    try:
+        # Open the shared memory object
+        shm_fd = os.open('/dev/shm/new_disc_shared_memory', os.O_RDWR)
+        
+        # Map the shared memory object
+        shm = mmap.mmap(shm_fd, 8)  # 8 is the size of the memory region
+        
+        # If we successfully mmap, the shared memory exists
+        shm.close()
+        os.close(shm_fd)
+        return True, shm
+    except FileNotFoundError:
+        # Shared memory does not exist
+        return False
+    except Exception as e:
+        print(f"Error checking shared memory: {e}")
+        return False
 
-def main():
+
+def wait_for_shared_memory(name, timeout=10):
+    """Wait for the shared memory block to be created."""
+    start_time = time.time()
+    while True:
+        try:
+            shm = shared_memory.SharedMemory(name='new_disc_shared_memory')
+            shm.close()
+            print("Shared memory new disc found.")
+            return
+        except FileNotFoundError:
+            if time.time() - start_time > timeout:
+                raise TimeoutError("Shared memory not found within the timeout period.")
+            time.sleep(0.1)
+
+    
+# Function to open the shared memory segment created by the C code
+def open_shared_memory():
+    try:
+        # Open the shared memory segment created by the C code
+        #shm_fd_new_disc = os.open(shm_name, os.O_RDWR)  # Open shared memory by name
+        #shm= mmap.mmap(shm_fd_new_disc, 8)  # Map the memory into the process address space
+        shm = shared_memory.SharedMemory(name='new_disc_shared_memory')
+
+        return shm
+    except FileNotFoundError:
+        print(f"Shared memory '{shm_name}' not found. Ensure the C program has created it first.")
+        return None
+if __name__ == "__main__":
+    shm = None
+    #wait_for_shared_memory()
+    
+    #shm = shared_memory.SharedMemory(name='new_disc_shared_memory') 
+    
+    #check_shared_memory_exists()
+    wait_for_shared_memory('new_disc_shared_memory', timeout=30)
+    
+    
     cap = video_capture()
     columns_in_state = [0] * num_columns  # Initialize an empty list to store detected columns
     previous_board_state = [0] * num_columns
-    print("Max Resolution: ", cap.get(cv2.CAP_PROP_FRAME_WIDTH), "x", cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    #print("Max Resolution: ", cap.get(cv2.CAP_PROP_FRAME_WIDTH), "x", cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
+    # Open shared memory
+    #shm_new_disc = open_shared_memory(shm_name)
     
-    try:
-        shm = shared_memory.SharedMemory(name=shm_name, create=True, size=shm_size)
-        print(f"Shared memory '{shm_name}' created.")
-    except FileExistsError:
-        shm = shared_memory.SharedMemory(name=shm_name, create=False)
-        print(f"Shared memory '{shm_name}' already exists. Attached to existing memory.")  
+    #if shm is None:
+     #   print("Failed to access shared memory. Exiting.")
+      #  cap.release()
+       # cv2.destroyAllWindows()
+        #exit(1)
     try:
         while cap.isOpened():
             time.sleep(.5)
@@ -194,8 +266,8 @@ def main():
             new_disc_column = detect_new_disc(previous_board_state, stable_columns)
             if new_disc_column is not None:
                 print(f"New disc detected in column: {new_disc_column}")
-                #write_to_shared_memory(shm, new_disc_column)
-                write_to_txt(new_disc_column)
+                write_to_shared_memory(shm, new_disc_column)
+                #write_to_txt(new_disc_column)
                 time.sleep(1)  # Simulate delay
             # Update the previous board state
                 previous_board_state = stable_columns.copy()
@@ -215,18 +287,33 @@ def main():
             # Exit condition
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
+    except KeyboardInterrupt:
+        print("\nProgram interrupted by user.")
 
-        # Cleanup shared memory
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
     finally:
-        shm.close()
-        shm.unlink()
-        print(f"Shared memory '{shm_name}' unlinked.")
+        
+        print("Releasing new disc shared memory.")
         cap.release()
         cv2.destroyAllWindows()
+        if shm:
+            try:
+                shm.close()  # Close the shared memory
+                shm.unlink()
+                print("Shared memory closed and unlinked.")
+            except FileNotFoundError:
+                print("Shared memory new disc already unlinked.")
+            except Exception as e:
+                print(f"Error while cleaning up new disc shared memory: {e}")
+            
+      #  shm.close()
+       # shm.unlink()
+        #print(f"Shared memory '{shm_name}' unlinked.")
+        #cap.release()
+        #cv2.destroyAllWindows()
         # Release resources
-        cap.release()
-        cv2.destroyAllWindows()
+        #cap.release()
+        #cv2.destroyAllWindows()
 
-if __name__ == "__main__":
-    main()
-    
+        
