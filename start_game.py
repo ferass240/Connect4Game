@@ -7,10 +7,12 @@ import signal
 # Pin setup
 GPIO.setmode(GPIO.BCM)  # Use BCM GPIO numbering
 GPIO.setup(22, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set pin 15 as input with pull-down resistor
+GPIO.setup(24, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)  # Set pin 15 as input with pull-down resistor
+
 GPIO.setup(23, GPIO.OUT)
 game_process = None  # Store the game process reference
 new_disc_process = None  # Store the new_disc.py monitoring process
-def flash_led_continuously(timeout=5):
+def flash_led_continuously(timeout):
     """Flash the LED continuously until the second press is detected or timeout occurs."""
     start_time = time.time()
     while time.time() - start_time < timeout:
@@ -36,7 +38,7 @@ def start_game_mode():
     print("First button press detected. Monitoring for second press for 5 seconds...")
     # When the second press occurs, keep the LED on
     # Flash the LED continuously and monitor for a second press
-    second_press_detected = flash_led_continuously(timeout=5)
+    second_press_detected = flash_led_continuously(5)
     GPIO.output(23, GPIO.HIGH)  # Keep LED on (set GPIO 17 HIGH)
     
     
@@ -45,6 +47,7 @@ def start_game_mode():
         os.system("echo 1 > game_mode.txt")  # Indicate Human vs. AI mode
         # Run the game in the background by calling the game function in a separate thread
         game_process = subprocess.Popen(["python3", "monitor_bot_move.py"])  # Run the game in the background
+        #time.sleep(20)
         start_new_disc_monitor()
         game_process.wait()  # Wait for the game to finish
     else:
@@ -52,6 +55,7 @@ def start_game_mode():
         os.system("echo 2 > game_mode.txt")  # Indicate AI vs. Human mode
         # Run the game in the background by calling the game function in a separate thread
         game_process = subprocess.Popen(["python3", "monitor_bot_move.py"])  # Run the game in the background
+        #time.sleep(20)
         start_new_disc_monitor()
         game_process.wait() 
     
@@ -59,7 +63,7 @@ def start_game_mode():
 def stop_program(channel):
     global game_process  # Access the global game_process reference
     print("Stop button pressed! Exiting program...")
-    GPIO.output(23, GPIO.LOW)
+    GPIO.output(24, GPIO.LOW)
     if game_process is not None:
         # Send SIGTERM signal to the game process to terminate it
         os.kill(game_process.pid, signal.SIGTERM)
@@ -72,6 +76,7 @@ def button_callback(channel):
     start_game_mode()
     
 GPIO.add_event_detect(22,GPIO.RISING,callback=button_callback, bouncetime=400) # Setup event on pin 10 rising edge
+GPIO.add_event_detect(24, GPIO.RISING, callback=stop_program, bouncetime=400)
 # Keep the program running
 try:
     print("Waiting for button presses...")

@@ -822,7 +822,7 @@ int main() {
 
 
 
-        printf("Creating shared memory...\n");
+    printf("Creating shared memory...\n");
 
     // Create shared memory object
     shm_fd_new_disc = shm_open(SHM_NAME_NEW_DISC, O_CREAT | O_RDWR, 0666);
@@ -944,16 +944,39 @@ int main() {
     // Set shared memory to 255 to signal the end of the game
     *move_ptr = 255;  // Game over signal
 
-    // Cleanup
-    munmap(move_ptr, SHM_SIZE);  // Unmap the shared memory
-    close(fd);  // Close the shared memory object
+
+        // Cleanup shared memory when done
+    if (munmap(move_ptr, SHM_SIZE) == -1) {
+        perror("Error unmapping shared memory");
+    }
+
+    if (shm_unlink(SHM_NAME) == -1) {
+        perror("Error unlinking shared memory");
+    }
+
+    if (close(fd) == -1) {
+        perror("Error closing shared memory file descriptor");
+    } else {
+        printf("Shared memory '%s' cleaned up successfully.\n", SHM_NAME_NEW_DISC);
+    }
+
   
-    
-      // Cleanup shared memory when done
-    munmap(shm_ptr_new_disc, 8);       // Unmap the memory
-    shm_unlink(SHM_NAME_NEW_DISC);     // Unlink the shared memory
-    close(shm_fd_new_disc);            // Close the file descriptor
-    printf("Shared memory '%s' cleaned up.\n", SHM_NAME_NEW_DISC);
+  
+  
+    // Cleanup shared memory when done
+    if (munmap(shm_ptr_new_disc, 8) == -1) {
+        perror("Error unmapping shared memory");
+    }
+
+    if (shm_unlink(SHM_NAME_NEW_DISC) == -1) {
+        perror("Error unlinking shared memory");
+    }
+
+    if (close(shm_fd_new_disc) == -1) {
+        perror("Error closing shared memory file descriptor");
+    } else {
+        printf("Shared memory '%s' cleaned up successfully.\n", SHM_NAME_NEW_DISC);
+    }
 
     os_finish();
     
