@@ -16,18 +16,33 @@
 
 /* Engine, AI, and Display Parameters */
 #define SHM_NAME "/bot_move"  // Name of the shared memory segment
-#define SHM_SIZE 2*sizeof(int)     // Size of the shared memory (size of an int)
+#define SHM_SIZE 8*sizeof(int)     // Size of the shared memory (size of an int)
+
+
+#define SHM_WINNER_NAME "/winner_shm"  // Name of the shared memory segment
+#define SHM_WINNER_SIZE 4     // Size of the shared memory (size of an int)
+
+
 
 //#define FILE_PATH "detected_disc.txt"
 
 
 #define SHM_NAME_NEW_DISC "/new_disc_shared_memory"
 #define SHM_NEW_DISC_SIZE 8*sizeof(int) 
-        
+
+
+#define SHM_NAME_GAME_MODE "/game_mode_shm" // Shared memory name for game mode
+#define SHM_GAME_MODE_SIZE 4 
+
+
 // const char *SHM_NAME_NEW_DISC = "/new_disc_shared_memory";
 int shm_fd_new_disc;
 void *shm_ptr_new_disc;
 
+
+
+//void *shm_ptr_game_mode;
+//int shm_fd_game_mode;
 
 #define WINNER_FILE "winner.txt"  // The file where the winner will be written
 
@@ -331,10 +346,10 @@ connect4_init(void *buf, size_t bufsize)
 }
 
 
-const char *file_path = "/tmp/bot_move.txt";
+//const char *file_path = "/tmp/bot_move.txt";
 
-// Add this function to write the bot's move to a file
 void write_bot_move_to_shm(int move) {
+    
     int fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
     if (fd == -1) {
         perror("shm_open failed");
@@ -348,9 +363,18 @@ void write_bot_move_to_shm(int move) {
         return;
     }
     ptr[0] = move + 1; // Write the move
+    ptr[1] = 1;        // Set the flag to 1
     munmap(ptr, 1);
     close(fd);
 }
+
+
+
+
+
+
+/**
+
 // Function to delete the file if it exists
 int delete_bot_move_file() {
     // Check if the file exists
@@ -360,7 +384,7 @@ int delete_bot_move_file() {
         return 0;
     }
 }
-
+**/     
 static void
 connect4_advance(struct connect4_ai *c, int play)
 {
@@ -651,10 +675,18 @@ static int connect4_game_run(struct connect4_game *g,
 
         // Apply the move to the game
         enum connect4_result r = connect4_game_move(g, play);
-
         // Display the game state if enabled
         if (display) {
             connect4_display(g->state[0], g->state[1], g->marker);
+        switch (r) {
+            case CONNECT4_RESULT_UNRESOLVED:
+                break;
+            case CONNECT4_RESULT_DRAW:
+                return 2;
+            case CONNECT4_RESULT_WIN:
+                return g->winner;
+            }
+
         }
 
         
@@ -662,41 +694,10 @@ static int connect4_game_run(struct connect4_game *g,
     }
 }
 
-/**int read_new_disc_from_file() {
-    FILE *file = fopen(FILE_PATH, "r");
-    if (file == NULL) {
-        perror("Failed to open file");
-        return -1;
-    }
-
-    int detected_column;
-    if (fscanf(file, "%d", &detected_column) == 1) {
-        // After reading the value, clear the contents of the file
-        sleep(3);
-        fclose(file);
-
-        // Open the file in write mode to clear its contents
-        file = fopen(FILE_PATH, "w");
-        if (file == NULL) {
-            perror("Failed to open file for clearing");
-            return -1;
-        }
-        fclose(file);  // Close it after clearing
-
-        return detected_column;
-    } else {
-        fclose(file);
-        return -1; // Return -1 if no valid data is found
-    }
-}**/
-
-
-
-
 
 // Function to read the value from shared memory
 int read_from_shared_memory(void *shm_ptr_new_disc) {
-
+    
     
     int value = -1; // Default return value if flag is not set
 
@@ -732,7 +733,6 @@ static int player_human(const struct connect4_game *g, void *arg) {
     int play = -1;
     while (play == -1) { // Wait for a valid move
         play = read_from_shared_memory(shm_ptr_new_disc);
-        //play = read_new_disc_from_file(); // Read the move from the .txt file
         
         if (play == -1) {
             sleep(1); // Wait before retrying to avoid busy-waiting
@@ -768,61 +768,71 @@ player_ai(const struct connect4_game *g, void *arg)
 static char buf[2][CONNECT4_MEMORY_SIZE];  // AI search tree storage
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 int main() {
-
-
     
+    // Open shared memory segment
+    int shm_fd_game_mode = shm_open(SHM_NAME_GAME_MODE, O_RDONLY, 0666);  // Open for reading
+    if (shm_fd_game_mode == -1) {
+        perror("Failed to open shared memory segment for game mode");
+        exit(EXIT_FAILURE);
+    }
+
+    // Map the shared memory into the process's address space
+    void *shm_ptr_game_mode = mmap(NULL, SHM_GAME_MODE_SIZE, PROT_READ, MAP_SHARED, shm_fd_game_mode, 0);
+    if (shm_ptr_game_mode == MAP_FAILED) {
+        perror("Failed to map shared memory for game mode");
+        exit(EXIT_FAILURE);
+    }
+    //os_reset_terminal();
+    // Read the game mode from shared memory
+    int mode = *((int *)shm_ptr_game_mode);
+    printf("************Game mode read from shared memory: %d\n", mode);
+    
+    // Cleanup
+    if (munmap(shm_ptr_game_mode, SHM_GAME_MODE_SIZE) == -1) {
+        perror("Error unmapping shared memory");
+    }
+    
+    
+
     int player_type[2] = {PLAYER_AI, PLAYER_HUMAN};  // Default: AI vs. Human
 
     //Check for game mode signal
-    FILE *file1 = fopen("game_mode.txt", "r");
-    if (file1) {
-        os_reset_terminal();
-        int mode;
-        if (fscanf(file1, "%d", &mode) == 1) {
-            if (mode == 1) {
-                player_type[0] = PLAYER_HUMAN;  // Human vs. AI
-                player_type[1] = PLAYER_AI;
-            } else if (mode == 2) {
-                player_type[0] = PLAYER_AI;  // AI vs. Human
-                player_type[1] = PLAYER_HUMAN;
-            }
-        }
-        fclose(file1);
-        remove("game_mode.txt");  // Clear the signal file after reading
+    os_reset_terminal();
+    if (mode == 1) {
+        player_type[0] = PLAYER_HUMAN;  // Human vs. AI
+        player_type[1] = PLAYER_AI;
+        
+    } else if (mode == 2) {
+        player_type[0] = PLAYER_AI;  // AI vs. Human
+        player_type[1] = PLAYER_HUMAN;
+        
     }
     
+
     os_init();
     setlocale(LC_ALL, "");
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
 
 
 
 
 
-    printf("Creating shared memory...\n");
+
+    printf("Creating shared memory for a new disc...\n");
 
     // Create shared memory object
     shm_fd_new_disc = shm_open(SHM_NAME_NEW_DISC, O_CREAT | O_RDWR, 0666);
@@ -859,7 +869,7 @@ int main() {
 
 
     // Delete any old IPC file if necessary
-    delete_bot_move_file();
+    // delete_bot_move_file();
 
     // Shared memory setup for bot move communication
     int fd = shm_open(SHM_NAME, O_CREAT | O_RDWR, 0666);
@@ -880,12 +890,62 @@ int main() {
         perror("mmap failed");
         exit(1);
     }
+    
+        // Initialize shared memory to 0
+    *((int *)move_ptr) = 0;      // Value
+    *((int *)((uint8_t *)move_ptr + 4)) = 0; // Flag
 
-    // Initialize game
-    int game_over = 0;
+    
+    
+    // Shared memory setup for winner communication
+    int winner_fd = shm_open(SHM_WINNER_NAME, O_CREAT | O_RDWR, 0666);
+    if (winner_fd == -1) {
+        perror("shm_open failed");
+        exit(1);
+    }
 
-     // Main Menu
-    int done = 0;
+    // Set the size of shared memory
+    if (ftruncate(winner_fd, SHM_WINNER_SIZE) == -1) {
+        perror("ftruncate failed");
+        exit(1);
+    }
+
+    // Map shared memory to the process address space
+    int *winner_ptr = mmap(NULL, SHM_WINNER_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, winner_fd, 0);
+    if (winner_ptr == MAP_FAILED) {
+        perror("mmap failed");
+        exit(1);
+    }
+    //*((int *)winner_ptr) = 2;      // Value
+    //winner_ptr[0] = 2;  // Writing value
+    //printf("Value written: %d\n", winner_ptr[0] );
+    //sleep(10);
+    winner_ptr[0] = 255;  // Writing value
+    //printf("Value written: %d\n", winner_ptr[0] );
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
     // Start the game with the selected player types
     printf("Game starting: Player 1: %d, Player 2: %d\n", player_type[0], player_type[1]);
     
@@ -918,7 +978,7 @@ int main() {
     connect4_game_run(&game, players, args, 1);
 
     // After the game ends, write the winner to shared memory
-   // *(move_ptr+1) = game.winner;  // Store the winner in shared memory (0, 1 for player, -1 for draw)
+    winner_ptr[0] = game.winner;  // Store the winner in shared memory (0, 1 for player, -1 for draw)
 
     // Display the game result
     if (game.winner == -1) {
@@ -931,7 +991,7 @@ int main() {
         os_color(0);
         wprintf(L" wins!\n");
     }
-    FILE *file2 = fopen(WINNER_FILE, "w");
+   /** FILE *file2 = fopen(WINNER_FILE, "w");
     if (file2 == NULL) {
         perror("Failed to open file");
     }
@@ -940,7 +1000,7 @@ int main() {
     fclose(file2);
     printf("Winner %d written to %s\n", game.winner, WINNER_FILE);
     sleep(30);
-
+**/
     // Set shared memory to 255 to signal the end of the game
     *move_ptr = 255;  // Game over signal
 
@@ -957,10 +1017,23 @@ int main() {
     if (close(fd) == -1) {
         perror("Error closing shared memory file descriptor");
     } else {
-        printf("Shared memory '%s' cleaned up successfully.\n", SHM_NAME_NEW_DISC);
+        printf("Shared memory '%s' cleaned up successfully.\n", SHM_NAME);
     }
 
-  
+    // Cleanup winner shared memory when done
+    if (munmap(winner_ptr, SHM_WINNER_SIZE) == -1) {
+        perror("Error unmapping shared memory");
+    }
+
+    if (shm_unlink(SHM_WINNER_NAME) == -1) {
+        perror("Error unlinking shared memory");
+    }
+
+    if (close(winner_fd) == -1) {
+        perror("Error closing shared memory file descriptor");
+    } else {
+        printf("Shared memory '%s' cleaned up successfully.\n", SHM_WINNER_NAME);
+    }
   
   
     // Cleanup shared memory when done
@@ -977,6 +1050,14 @@ int main() {
     } else {
         printf("Shared memory '%s' cleaned up successfully.\n", SHM_NAME_NEW_DISC);
     }
+    
+    
+    // Unmap and close shared memory
+    munmap(shm_ptr_game_mode, SHM_GAME_MODE_SIZE);
+    close(shm_fd_game_mode);
+    // Remove the shared memory object
+    shm_unlink(SHM_NAME_GAME_MODE);  // Clear the signal file after reading
+
 
     os_finish();
     

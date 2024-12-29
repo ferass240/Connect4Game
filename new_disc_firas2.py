@@ -141,17 +141,8 @@ def stabilize_column_counts(columns_in_state):
     smoothed_counts = [int(round(np.mean(column_history[i]))) for i in range(num_columns)]
     return smoothed_counts
 
-def detect_new_disc(previous_board_state, current_stable_columns):
-    for i in range(len(previous_board_state)):
-        if current_stable_columns[i] == previous_board_state[i] + 1:
-            return i + 1  # Return the 1-based index of the column
-    return None  # Return None if no column increased
 
-def write_to_txt(detected_column):
-    with open("detected_disc.txt", "w") as file:
-        file.write(f"{detected_column}\n")
-    time.sleep(3)
-    print(f"Written to file: {detected_column}")
+
 
 def write_to_shared_memory(shm, detected_column):
     try:
@@ -215,15 +206,58 @@ def open_shared_memory():
     except FileNotFoundError:
         print(f"Shared memory '{shm_name}' not found. Ensure the C program has created it first.")
         return None
+        
+        
+        
+        
+        
+        
+        
+def detect_new_disc(previous_board_state, current_stable_columns, c):
+    """
+    Detect new discs by summing all discs in the current board state and comparing with the previous state.
+    If the total number of discs increases by more than 1, handle it as an error.
+    """
+    
+    total_previous_discs = sum(previous_board_state)
+    total_current_discs = sum(current_stable_columns)
+    #print(f"im c in detect function:{c}")
+    print(total_previous_discs)
+    print(total_current_discs)
+    if c == 0 and current_stable_columns != [0] * num_columns :
+        print("Board is not empty. Please empty the board and start again.")
+        return "error"
+    # Check if the total number of discs increased by more than 1
+    if total_current_discs > total_previous_discs + 1:
+        print("Error: More than one disc inserted in a single turn. Game over.")
+        return "error"
+
+    # Identify the column where the new disc was added
+    for i in range(len(previous_board_state)):
+        if current_stable_columns[i] == previous_board_state[i] + 1  :
+            return i + 1  # Return the 1-based index of the column
+
+    return None  # Return None if no new disc is detected
+    
+    
+    
+    
+    
+    
+    
+    
+    
 if __name__ == "__main__":
+    c = 0 
     shm = None
+    shm_bot_move = None  
     #wait_for_shared_memory()
     
     #shm = shared_memory.SharedMemory(name='new_disc_shared_memory') 
     
     #check_shared_memory_exists()
     wait_for_shared_memory('new_disc_shared_memory', timeout=30)
-    
+    wait_for_shared_memory('bot_move', timeout=30)
     
     cap = video_capture()
     columns_in_state = [0] * num_columns  # Initialize an empty list to store detected columns
@@ -240,7 +274,9 @@ if __name__ == "__main__":
         #exit(1)
     try:
         while cap.isOpened():
-            time.sleep(.5)
+            time.sleep(3)
+            print(f"Frame counter: {c}")
+            #shm_bot_move = shared_memory.SharedMemory(name='bot_move')
             ret, frame = cap.read()
             if not ret:
                 print("Failed to capture video")
@@ -260,28 +296,36 @@ if __name__ == "__main__":
                 
                 columns_in_state[column - 1] += 1
             
-            stable_columns = stabilize_column_counts(columns_in_state)
+            #print(f" first state when c = 0 : {sum(columns_in_state)}")
+            #stable_columns = stabilize_column_counts(columns_in_state)
+            stable_columns = columns_in_state
             #print("Stabilized column counts:", stable_columns)
-
-            new_disc_column = detect_new_disc(previous_board_state, stable_columns)
+            print(f"number of discs in stable columns: {sum(stable_columns)}")
+            new_disc_column = detect_new_disc(previous_board_state, stable_columns,c)
+            c += 1
+            if(new_disc_column == "error"):
+                break
             if new_disc_column is not None:
+                
                 print(f"New disc detected in column: {new_disc_column}")
                 write_to_shared_memory(shm, new_disc_column)
-                #write_to_txt(new_disc_column)
                 time.sleep(1)  # Simulate delay
+            
+                
             # Update the previous board state
-                previous_board_state = stable_columns.copy()
+            previous_board_state = stable_columns.copy()
+                
            # else:
                 #print("No new disc detected.")
 
 
-            columns_in_state = [0] * num_columns
-            cv2.imshow("Detected Circles", roi)
+            #columns_in_state = [0] * num_columns
+            #cv2.imshow("Detected Circles", roi)
            
             
             # Display the live feed with ROI
             cv2.rectangle(live_cam, (70, 80), (560, 440), (0, 255, 0), 2)
-            cv2.imshow("live cam", live_cam)
+            #cv2.imshow("live cam", live_cam)
           
 
             # Exit condition
@@ -307,13 +351,4 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error while cleaning up new disc shared memory: {e}")
             
-      #  shm.close()
-       # shm.unlink()
-        #print(f"Shared memory '{shm_name}' unlinked.")
-        #cap.release()
-        #cv2.destroyAllWindows()
-        # Release resources
-        #cap.release()
-        #cv2.destroyAllWindows()
-
         
