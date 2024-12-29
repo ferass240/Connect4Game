@@ -9,6 +9,17 @@ import subprocess
 
 
 def cleanup(pin_map, shm=None, c_process=None):
+    if shm:
+        try:
+            # Reset shared memory to 255 (idle state)
+            shm.buf[0] = 255
+            shm.close()
+            shm.unlink()  # Unlink shared memory to ensure it is removed
+            print("Shared memory bot move unlinked.")
+        except Exception as e:
+            print(f"Error while cleaning up shared  memory: {e}")
+        
+    
     """Clean up GPIO pins, shared memory, and C program process."""
     GPIO.setmode(GPIO.BCM)  # Use BCM pin numbering
     GPIO.setwarnings(False)
@@ -21,15 +32,7 @@ def cleanup(pin_map, shm=None, c_process=None):
     
     GPIO.cleanup()
     
-    if shm:
-        try:
-            # Reset shared memory to 255 (idle state)
-            shm.buf[0] = 255
-            shm.close()
-            shm.unlink()  # Unlink shared memory to ensure it is removed
-            print("Shared memory unlinked.")
-        except Exception as e:
-            print(f"Error while cleaning up shared memory: {e}")
+
 
     if c_process:
         c_process.terminate()
@@ -104,24 +107,9 @@ def monitor_bot_move():
                 print("Invalid value in shared memory. Expected a number between 0 and 7.")
                 
 
-#    finally:
-        # Cleanup
- #       if shm:
-  #          try:
-   #             cleanup(pin_map, shm, c_process)
-    #            print("Shared memory closed and unlinked.")
-     #       except Exception as e:
-      #          print(f"Error during shared memory cleanup: {e}")
-       # else:
-        #    print("No shared memory to clean up.")
-         #   cleanup(pin_map, shm, c_process)
-            #Cleanup GPIO and shared memory
-        
- 
-
 if __name__ == "__main__":
     
-    shm = None  # Initialize shared memory reference
+    #shm = None  # Initialize shared memory reference
 
     # Set up GPIO
     GPIO.setmode(GPIO.BCM)  # Use BCM pin numbering
@@ -141,7 +129,7 @@ if __name__ == "__main__":
 
     try:
         # Start the C program
-        print("Calling function start_c_program")
+        #print("Calling function start_c_program")
         c_process = start_c_program()
         time.sleep(1)
         wait_for_shared_memory('bot_move', timeout=30)
@@ -154,7 +142,6 @@ if __name__ == "__main__":
         sys.exit(1)
     except KeyboardInterrupt:
         print("\nProgram interrupted by user.")
-
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
     finally:
